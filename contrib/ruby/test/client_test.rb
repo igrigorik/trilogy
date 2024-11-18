@@ -1131,4 +1131,44 @@ class ClientTest < TrilogyTest
     assert_operator SystemCallError, :===, klass.new
     assert_operator Trilogy::ConnectionError, :===, klass.new
   end
+
+  def test_buffer_memory_management
+    require 'objspace'
+    client = new_tcp_client
+    create_test_table(client)
+
+    initial_memsize = ObjectSpace.memsize_of(client)
+
+    # Insert batch of small queries to verify normal operation
+    50.times do |i|
+      client.query("INSERT INTO trilogy_test (int_test) VALUES (#{i})")
+    end
+
+    small_ops_memsize = ObjectSpace.memsize_of(client)
+    assert_operator small_ops_memsize, :<=, initial_memsize * 2,
+      "Memory shouldn't grow significantly for small operations"
+
+    # Insert large row that will force buffer growth
+    large_value = "x" * (1024 * 1024 * 2) # 2MB of data
+    client.query("INSERT INTO trilogy_test (text_test) VALUES ('#{large_value}')")
+
+    large_op_memsize = ObjectSpace.memsize_of(client)
+    assert_operator large_op_memsize, :>, small_ops_memsize,
+      "Memory should expand for large operations"
+    assert_operator large_op_memsize, :>, large_value.bytesize,
+      "Memory should expand to fit row size"
+
+    # Execute small query to trigger buffer reset
+    client.query("SELECT id FROM trilogy_test WHERE id = 1")
+
+    final_memsize = ObjectSpace.memsize_of(client)
+    assert_operator final_memsize, :<, large_op_memsize,
+      "Memory should decrease after a small query is executed"
+
+    # Should be within reasonable bounds of initial size
+    assert_operator final_memsize, :<=, large_op_memsize / 2,
+      "Memory should scale down by factor of default expand multiplier"
+  ensure
+    ensure_closed client
+  end
 end

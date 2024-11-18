@@ -41,6 +41,17 @@ int trilogy_buffer_expand(trilogy_buffer_t *buffer, size_t needed)
         buffer->cap = new_cap;
     }
 
+    // reduce buffer if it's significantly larger than needed
+    else if (buffer->cap > (buffer->len + needed) * 2) {
+        size_t new_cap = buffer->cap / EXPAND_MULTIPLIER;
+        uint8_t *new_buff = realloc(buffer->buff, new_cap);
+        if (new_buff == NULL)
+            return TRILOGY_SYSERR;
+
+        buffer->buff = new_buff;
+        buffer->cap = new_cap;
+    }
+
     return TRILOGY_OK;
 }
 
